@@ -1,18 +1,71 @@
-# loading in our libraries and cleaned data
+# loading libaries for streamlit to build the dashboard
 import streamlit as st
 import pandas as pd
 import matplotlib.pyplot as plt
 from matplotlib.ticker import FuncFormatter
 
+# used to recreate the same train/test split and train the Random Forest
 from sklearn.model_selection import train_test_split
 from sklearn.ensemble import RandomForestRegressor
 
+# applying a consistent theme to the app using CSS
+st.markdown("""
+<style>
+    /* Main app background */
+    .stApp{
+        background-color: #0B1220;
+        color: #F4F6F8;
+    }
+
+    /* Main text */
+    p, label, .stMarkdown {
+        color: #F4F6F8;
+    }
+
+    /* Metric cards */
+    [data-testid = "stMetric"] {
+        background-color: #111C2E;
+        border: 1px solid #24344D;
+        border-radius: 12px;
+        padding: 18px;
+    }
+
+    /* Metric labels */
+    [data-testid = "stMetricLabel"] {
+        color: #AAB5C5;
+    }
+
+    /* Metric values */
+    [data-testid = "stMetricValue"] {
+        color: #F4F6F8;
+    }
+
+    /* Buttons */
+    .stButton > button {
+        background-color: #4A90E2;
+        color: #F4F6F8;
+        border: none;
+        border-radius: 8px;
+        padding: 0.5rem 1.2rem;
+        font-weight: 600;
+    }
+
+    .stButton > button:hover {
+        background-color: #76B5F5;
+        color: #0B1220;
+    }
+</style>
+""", unsafe_allow_html = True)
+
+# loading in the cleaned survey data for the dashboard
 df = pd.read_csv('data/cleaned_survey.csv')
 
-# preparing data in advance for Random Forest predictor in app
-df_clean = df.copy()
+# loading the encoded dataset used to train the Random Forest
+# this will keep the app's training data consistent with the modeling notebook
+df_encoded = pd.read_csv('data/encoded_survey.csv')
 
-# remapping ordinal encoding for 'Age'
+# these maps will convert the original categorical survey responses into numerical values for the model
+# need to use these for when the user inputs their responses in the app
 age_map = {
     '18-24 years old': 1,
     '25-34 years old': 2,
@@ -22,7 +75,6 @@ age_map = {
     '65 years or older': 6
 }
 
-# remapping the ordinal encoding for 'EdLevel'
 edlevel_map = {
     'Secondary school (e.g. American high school, German Realschule or Gymnasium, etc.)': 1,
     'Some college/university study without earning a degree': 2,
@@ -33,8 +85,6 @@ edlevel_map = {
     'Other (please specify):': 0
 }
 
-# remapping the ordinal encoding for 'OrgSize'
-# ordinal encoding for orgization size
 orgsize_map = {
     'Just me - I am a freelancer, sole proprietor, etc.': 1,
     'Less than 20 employees': 2,
@@ -46,34 +96,15 @@ orgsize_map = {
     '10,000 or more employees': 8
 }
 
-df_clean['Age_encoded'] = df_clean['Age'].map(age_map)
-df_clean['EdLevel_encoded'] = df_clean['EdLevel'].map(edlevel_map)
-df_clean['OrgSize_encoded'] = df_clean['OrgSize'].map(orgsize_map)
-
-# recreating the one-hot encoded nominal variables
-nominal_columns = ['DevType', 'Country', 'Industry', 'Employment', 'ICorPM', 'RemoteWork']
-df_encoded = pd.get_dummies(df_clean, columns = nominal_columns, drop_first = True) 
-
-# recreating the multi-label encoding for languages & databases
-language_dummies = df_clean['LanguageHaveWorkedWith'].str.get_dummies(sep=';').add_prefix('lang_')
-database_dummies = df_clean['DatabaseHaveWorkedWith'].str.get_dummies(sep=';').add_prefix('db_')
-df_encoded = pd.concat([df_encoded.drop(columns = ['LanguageHaveWorkedWith', 'DatabaseHaveWorkedWith']), 
-                        language_dummies, database_dummies], axis = 1)
-
-# removing the original categorical columns, and max_reasonable_age
-columns_to_drop = ['Age', 'EdLevel', 'OrgSize']
-if 'max_reasonable_age' in df_encoded.columns:
-    columns_to_drop.append('max_reasonable_age')
-df_encoded = df_encoded.drop(columns = columns_to_drop)
-
-# setting of X and y for train/test & modeling
+# separate the target (salary) from the model features
+# ResponseId is also removed because it identifies the response rather than giving useful information
 X = df_encoded.drop(columns = ['annual_salary_usd', 'ResponseId'])
 y = df_encoded['annual_salary_usd']
 
-# using same train/test split used in notebook file to replicate exactly
+# using the same 80/20 split and random state as the modeling notebook so model is evaluated and reproduced correctly
 X_train, X_test, y_train, y_test = train_test_split(X, y, test_size = 0.2, random_state= 42)
 
-# training Random Forest
+# training Random Forest selected during model comparison
 rf_model = RandomForestRegressor(
     n_estimators = 100,
     random_state = 42,
@@ -81,23 +112,33 @@ rf_model = RandomForestRegressor(
 )
 rf_model.fit(X_train, y_train)
 
-# building our header/title screen
-st.title("Developer Salary Predictor")
-st.write(
-    "Exploring developer salaries and comparing machine learning."
-)
+# main title and short description for the application
+# using markdown for more detailing
+st.markdown(
+    """
+    <div class = "hero">
+        <div class = "eyebrown" > DATA EXPLORATION • MACHINE LEARNING</div>
+        <h1>Developer Salary Lab</h1>
+        <p>
+                Explore salary patterns, compare predictive models, 
+                and estimate compensation based on developer experience.
+        </p>
+    </div>
+""", unsafe_allow_html = True)
 
-# getting tabs set up for what content dashboard will have
+# diving the dashboard into three setcions:
+# dataset exploration/overview, model comparisons, and interactive prediction
 tab1, tab2, tab3 = st.tabs([
-   'Data Overview',
-   'Model Comparison',
-   'Salary Predictor'
+   '01 Data',
+   '02 Models',
+   '03 Predict'
 ])
 
 # TAB 1: Data Overview
 with tab1:
     st.header("Survey Overview")
 
+    # displays two quick smmary statistics at the top of the tab
     col1, col2 = st.columns(2)
 
     with col1:
@@ -111,7 +152,7 @@ with tab1:
 
     st.subheader('Salary Distribution')
 
-    # histogram to display annual_salary_usd
+    # visualizes how salaries are distributed across survey respondents
     fig, ax = plt.subplots(figsize = (10, 4))
 
     ax.hist(df['annual_salary_usd'], bins = 20)
@@ -120,7 +161,7 @@ with tab1:
     ax.set_ylabel('Number of Respondents')
     ax.set_title('Distribution of Developer Salaries')
 
-    # making the x-axis reflect USD better
+    # formatting the x-axis as dollar amounts in thousands
     ax.xaxis.set_major_formatter(
         FuncFormatter(lambda x, pos: f'${x/1000:.0f}k')
     )
@@ -132,7 +173,7 @@ with tab2:
     st.header('Model Comparison')
     st.write('Comparing Linear Regression and Random Forest Performance')
 
-    # key metrics
+    # highlighting the strongest result for each evaluation metric
     col1, col2, col3 = st.columns(3)
 
     with col1:
@@ -154,7 +195,7 @@ with tab2:
             'Random Forest'
         )
 
-    # displays our models' metrics in a comparison table
+    # stores the final metrics from both models in one table to compare performance
     comparison = pd.DataFrame({
         'Model': ['Linear Regression', 'Random Forest'],
         'R²': [0.533, 0.539],
@@ -162,6 +203,7 @@ with tab2:
         'RMSE': [46641, 46337]
     })
 
+    # creating a formatted copy for displaying dollar values cleanly
     comparison_display = comparison.copy()
 
     comparison_display['R²'] = comparison_display['R²'].map(lambda x: f'{x:.3f}')
@@ -175,6 +217,7 @@ with tab2:
        hide_index = True 
     )
 
+    # summarizes the main takeaway from the comparison
     st.info(
         'Random Forest achieved slightly higher R² and slightly lower ' \
         'RMSE, while Linear Regression had a lower MAE. Overall, ' \
@@ -187,6 +230,7 @@ with tab3:
     st.write('Enter developer characteristics to estimate annual salary!')
     st.subheader('Developer Information')
 
+    # collecting the characteristics that will be used as the model inputs
     col1, col2 = st.columns(2)
 
     with col1:
@@ -203,30 +247,31 @@ with tab3:
     col1, col2 = st.columns(2)
 
     with col1:
-        dev_type = st.selectbox('Developer Type', sorted(df_clean['DevType'].dropna().unique()))
-        country = st.selectbox('Country', sorted(df_clean['Country'].dropna().unique()))
-        industry = st.selectbox('Industry', sorted(df_clean['Industry'].dropna().unique()))
+        dev_type = st.selectbox('Developer Type', sorted(df['DevType'].dropna().unique()))
+        country = st.selectbox('Country', sorted(df['Country'].dropna().unique()))
+        industry = st.selectbox('Industry', sorted(df['Industry'].dropna().unique()))
 
     with col2:
-        employment = st.selectbox('Employment', sorted(df_clean['Employment'].dropna().unique()))
-        manager = st.selectbox('Management Status', sorted(df_clean['ICorPM'].dropna().unique()))
-        remote_work = st.selectbox('Remote Work', sorted(df_clean['RemoteWork'].dropna().unique()))
+        employment = st.selectbox('Employment', sorted(df['Employment'].dropna().unique()))
+        manager = st.selectbox('Management Status', sorted(df['ICorPM'].dropna().unique()))
+        remote_work = st.selectbox('Remote Work', sorted(df['RemoteWork'].dropna().unique()))
 
     st.subheader('Technical Experience')
 
     languages = st.multiselect(
         'Programming Languages',
-        sorted(df_clean['LanguageHaveWorkedWith'].dropna().str.split(';').explode().unique())
+        sorted(df['LanguageHaveWorkedWith'].dropna().str.split(';').explode().unique())
     )
 
     databases = st.multiselect(
         'Databases',
-        sorted(df_clean['DatabaseHaveWorkedWith'].dropna().str.split(';').explode().unique())
+        sorted(df['DatabaseHaveWorkedWith'].dropna().str.split(';').explode().unique())
     )
 
     # fun part! turn those selections into predictions from model
-    # creating a dataframe from the user's selections
-    input_df = pd.DataFrame({
+    # creating a dataframe from the user's selections, column names must match original survey data
+    # makes it easier to apply the same transformations used during model training
+    user_input = pd.DataFrame({
         'WorkExp': [work_exp],
         'YearsCode': [years_code],
         'Age_encoded': [age_map[age]],
@@ -242,33 +287,39 @@ with tab3:
         'DatabaseHaveWorkedWith': [';'.join(databases)]
     })
 
-    # recreating the one-hot encoding for categorical variables for user input dataframe
-    input_encoded = pd.get_dummies(
-        input_df,
+    # convert the categorical selections into one-hot encoded columns
+    # matches the approach used when prepping the training data
+    user_categorical = pd.get_dummies(
+        user_input,
         columns = ['DevType', 'Country', 'Industry', 'Employment', 'ICorPM', 'RemoteWork'],
         drop_first = True
     )
 
-    # recreating the multi-label encoding for languages and databases for user input dataframe
+    # converts the user's multiple language selections into separate binary columns
+    # 1 indicates that a language was selected
     language_input = (
-        input_df['LanguageHaveWorkedWith'].str.get_dummies(sep = ';').add_prefix('lang_')
+        user_input['LanguageHaveWorkedWith'].str.get_dummies(sep = ';').add_prefix('lang_')
     )
 
+    # the same multi label encoding for database selections (like languages)
     database_input = (
-        input_df['DatabaseHaveWorkedWith'].str.get_dummies(sep = ';').add_prefix('db_')
+        user_input['DatabaseHaveWorkedWith'].str.get_dummies(sep = ';').add_prefix('db_')
     )
 
+    # combining all the encoded inputs into one row
     user_input_encoded = pd.concat([
-        input_encoded.drop(columns = ['LanguageHaveWorkedWith', 'DatabaseHaveWorkedWith']),
+        user_categorical.drop(columns = ['LanguageHaveWorkedWith', 'DatabaseHaveWorkedWith']),
         language_input, database_input], axis = 1
     )
 
     # making sure the prediction row has exactly the same features and column order as Random Forest traning data
-    input_encoded = input_encoded.reindex(columns = X.columns, fill_value = 0)
+    # any feature the user did not select is filled with 0
+    user_input_encoded = user_input_encoded.reindex(columns = X.columns, fill_value = 0)
 
     st.subheader('Predicted Salary')
 
+    # generates a prediction when the user clicks the button
     if st.button('Predict Salary'):
-        prediction = rf_model.predict(input_encoded)[0]
+        prediction = rf_model.predict(user_input_encoded)[0]
 
         st.success(f'Estimated Annual Salary: ${prediction:,.0f}')
